@@ -2,12 +2,18 @@ import socket
 import threading
 import os
 import mimetypes
+from datetime import datetime
 
 
 HOST = '127.0.0.1'
 PORT = 8080
 WEB_ROOT = os.path.abspath("./python-http-server/www")
 
+def log_request(ip, method, path, status_code):
+    timestamp = datetime.now().strftime("[%y-%m-%d %H:%M:%S]")
+    log_line = f"{timestamp} {ip} {method} {path} {status_code}\n"
+    with open("server.log", "a", encoding="utf-8") as log_file:
+        log_file.write(log_line)
 
 def parse_http_request(request_data):
     try:
@@ -30,7 +36,7 @@ def handle_response(path):
 
 
     if not os.path.exists(file_path):
-        return http_response("404 Not Found", status_code=404)
+        return http_response("404 Not Found", status_code=404), 404
     
     content_type, _ = mimetypes.guess_type(file_path)
     if content_type is None:
@@ -40,14 +46,14 @@ def handle_response(path):
         if content_type.startswith("text"):
             with open(file_path, "r", encoding="utf-8") as f:
                 body = f.read()
-            return http_response(body, content_type=content_type)
+            return http_response(body, content_type=content_type), 200
         else:
             with open(file_path, "rb") as f:
                 body = f.read()
             return http_response(body, content_type=content_type, is_binary=True)
     except Exception as e:
         print(f"[ERROR] Could not read file: {e}")
-        return http_response("500 Internal Server Error", status_code=500)
+        return http_response("500 Internal Server Error", status_code=500), 500
 
 
 def http_response(body, status_code=200, content_type="text/plain", is_binary=False):
@@ -82,10 +88,14 @@ def handle_client(client_conn, client_addr):
 
         if method is None:
             response = http_response("400 Bad Request", status_code=400)
+            status_code = 400
         else:
-            response = handle_response(path)
+            response, status_code = handle_response(path)
 
         client_conn.sendall(response)
+
+        # Log the request
+        log_request(client_addr[0], method or "-", path or "-", status_code)
     finally:
         client_conn.close()
 
