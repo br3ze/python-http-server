@@ -1,11 +1,12 @@
 import socket
 import threading
 import os
+import mimetypes
 
 
 HOST = '127.0.0.1'
 PORT = 8080
-WEB_ROOT = '.\www'
+WEB_ROOT = os.path.abspath("./python-http-server/www")
 
 
 def parse_http_request(request_data):
@@ -23,21 +24,33 @@ def handle_response(path):
     if path == "/":
         path = "/index.html"
 
-    
     # Safely build file path
     file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
-
-    print(f"[DEBUG] File path resolved to: {file_path}")
-
-    if os.path.exists(file_path) and file_path.endswith(".html"):
-        with open(file_path, "r", encoding = "utf-8") as f:
-            body = f.read()
-        return http_response(body, content_type = "text/html")
-    else:
-        return http_response("404 Not Found", status_code = 404)
+    print(f"[DEBUG] Attempting to read: {file_path}")
 
 
-def http_response(body, status_code=200, content_type="text/plain"):
+    if not os.path.exists(file_path):
+        return http_response("404 Not Found", status_code=404)
+    
+    content_type, _ = mimetypes.guess_type(file_path)
+    if content_type is None:
+        content_type = "application/octet-stream"
+
+    try:
+        if content_type.startswith("text"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                body = f.read()
+            return http_response(body, content_type=content_type)
+        else:
+            with open(file_path, "rb") as f:
+                body = f.read()
+            return http_response(body, content_type=content_type, is_binary=True)
+    except Exception as e:
+        print(f"[ERROR] Could not read file: {e}")
+        return http_response("500 Internal Server Error", status_code=500)
+
+
+def http_response(body, status_code=200, content_type="text/plain", is_binary=False):
     status_messages = {
         200: "OK",
         404: "Not Found",
@@ -45,15 +58,17 @@ def http_response(body, status_code=200, content_type="text/plain"):
     }
     status_text = status_messages.get(status_code, "OK")
 
-    response = (
-        f"HTTP/1.1 {status_code} {status_text}\r\n"
-        f"Content-Type: {content_type}\r\n"
-        f"Content-Length: {len(body.encode('utf-8'))}\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        f"{body}"
-    )
-    return response
+    headers = [
+    f"HTTP/1.1 {status_code} {status_text}",
+    f"Content-Type: {content_type}",
+    f"Content-Length: {len(body)}",
+    "Connection: close",
+    "",
+    ""
+]
+    header_bytes = "\r\n".join(headers).encode()
+
+    return header_bytes + (body if is_binary else body.encode())
 
 
 def handle_client(client_conn, client_addr):
@@ -70,7 +85,7 @@ def handle_client(client_conn, client_addr):
         else:
             response = handle_response(path)
 
-        client_conn.sendall(response.encode())
+        client_conn.sendall(response)
     finally:
         client_conn.close()
 
