@@ -10,11 +10,13 @@ HOST = '127.0.0.1'
 PORT = 8080
 WEB_ROOT = os.path.abspath("./python-http-server/www")
 
+
 def log_request(ip, method, path, status_code):
     timestamp = datetime.now().strftime("[%y-%m-%d %H:%M:%S]")
     log_line = f"{timestamp} {ip} {method} {path} {status_code}\n"
     with open("server.log", "a", encoding="utf-8") as log_file:
         log_file.write(log_line)
+
 
 def parse_http_request(request_data):
     try:
@@ -35,26 +37,48 @@ def handle_response(path):
     file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
     print(f"[DEBUG] Attempting to read: {file_path}")
 
+    if os.path.isdir(file_path):
+        # If index.html exists in the directory, serve it
+        index_file = os.path.join(file_path, "index.html")
+        if os.path.exists(index_file):
+            with open(index_file, "r", encoding="utf-8") as f:
+                body = f.read()
+            return http_response(body, content_type="text/html"), 200
+        
+            # Otherwise, generate directory listing
+        try:
+            items = os.listdir(file_path)
+            links = []
+            
+            for item in items:
+                full_path = os.path.join(path, item).replace("\\", "/")
+                links.append(f'<li><a href="{full_path}">{item}</a></li>')
 
-    if not os.path.exists(file_path):
-        return http_response("404 Not Found", status_code=404), 404
+            body = f"<h1>Directory listing for {path}</h1><ul>{''.join(links)}</ul>"
+            return http_response(body, content_type="text/html"), 200
+        except Exception as e:
+            print(f"[ERROR] Failed to list directory: {e}")
+            return http_response("500 Internal Server Error", status_code=500), 500
     
-    content_type, _ = mimetypes.guess_type(file_path)
-    if content_type is None:
-        content_type = "application/octet-stream"
+    elif os.path.isfile(file_path):
+        content_type, _ = mimetypes.guess_type(file_path)
+        if content_type is None:
+            content_type = "application/octet-stream"
 
-    try:
-        if content_type.startswith("text"):
-            with open(file_path, "r", encoding="utf-8") as f:
-                body = f.read()
-            return http_response(body, content_type=content_type), 200
-        else:
-            with open(file_path, "rb") as f:
-                body = f.read()
-            return http_response(body, content_type=content_type, is_binary=True)
-    except Exception as e:
-        print(f"[ERROR] Could not read file: {e}")
-        return http_response("500 Internal Server Error", status_code=500), 500
+        try:
+            if content_type.startswith("text"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    body = f.read()
+                return http_response(body, content_type=content_type), 200
+            else:
+                with open(file_path, "rb") as f:
+                    body = f.read()
+                return http_response(body, content_type=content_type, is_binary=True), 200
+        except Exception as e:
+            print(f"[ERROR] Could not read file: {e}")
+            return http_response("500 Internal Server Error", status_code=500), 500
+    else:
+        return http_response("404 Not Found", status_code=404), 404
 
 
 def http_response(body, status_code=200, content_type="text/plain", is_binary=False):
