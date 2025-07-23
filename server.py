@@ -3,6 +3,7 @@ import threading
 import os
 import mimetypes
 from datetime import datetime
+from urllib.parse import parse_qs
 
 
 HOST = '127.0.0.1'
@@ -67,7 +68,7 @@ def http_response(body, status_code=200, content_type="text/plain", is_binary=Fa
     headers = [
     f"HTTP/1.1 {status_code} {status_text}",
     f"Content-Type: {content_type}",
-    f"Content-Length: {len(body)}",
+    f"Content-Length: {len(body if is_binary else body.encode())}",
     "Connection: close",
     "",
     ""
@@ -80,22 +81,37 @@ def http_response(body, status_code=200, content_type="text/plain", is_binary=Fa
 def handle_client(client_conn, client_addr):
     try:
         request_bytes = client_conn.recv(4096)
-        request_text = request_bytes.decode()
+        request_text = request_bytes.decode(errors="ignore")
 
         print(f"Request from {client_addr}:\n{request_text}")
 
         method, path, version = parse_http_request(request_text)
+        headers, body = request_text.split("\r\n\r\n", 1) if "\r\n\r\n" in request_text else (request_text, "")
+        status_code = 200
 
-        if method is None:
-            response = http_response("400 Bad Request", status_code=400)
-            status_code = 400
-        else:
-            response, status_code = handle_response(path)
+        match method:
+            case "GET":
+                response, status_code = handle_response(path)
 
+            case "POST":
+                form_data = parse_qs(body)
+                response_body = f"<h1>Form Data Received</h1><pre>{form_data}</prev>"
+                response = http_response(response_body, content_type="text/html")
+                status_code = 200
+
+            case _:
+                response = http_response("405 Method Not Allowed", status_code=405)
+                status_code = 405
+        
         client_conn.sendall(response)
 
         # Log the request
         log_request(client_addr[0], method or "-", path or "-", status_code)
+
+    except Exception as e:
+        print(f"[ERROR] Client handling failed: {e}")
+        response = http_response("500 Internal Server Error", status_code=500)
+        client_conn.sendall(response)
     finally:
         client_conn.close()
 
