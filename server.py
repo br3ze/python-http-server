@@ -33,59 +33,67 @@ def handle_response(path):
     if path == "/":
         path = "/index.html"
 
-    # Safely build file path
-    file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
-    print(f"[DEBUG] Attempting to read: {file_path}")
+    file_path = get_file_path(path)
 
-    if os.path.isdir(file_path):
-        # If index.html exists in the directory, serve it
-        index_file = os.path.join(file_path, "index.html")
-        if os.path.exists(index_file):
-            with open(index_file, "r", encoding="utf-8") as f:
-                body = f.read()
-            return http_response(body, content_type="text/html"), 200
+    match True:
+        case _ if os.path.isdir(file_path):
+            return serve_directory_listing(path, file_path)
+        case _ if os.path.isfile(file_path):
+            return serve_static_file(file_path)
+        case _:
+            return http_response("404 Not Found", status_code=404), 404
         
-            # Otherwise, generate directory listing
-        try:
-            items = os.listdir(file_path)
-            links = []
-            
-            for item in items:
-                full_path = os.path.join(path, item).replace("\\", "/")
-                links.append(f'<li><a href="{full_path}">{item}</a></li>')
 
-            body = f"<h1>Directory listing for {path}</h1><ul>{''.join(links)}</ul>"
-            return http_response(body, content_type="text/html"), 200
-        except Exception as e:
-            print(f"[ERROR] Failed to list directory: {e}")
-            return http_response("500 Internal Server Error", status_code=500), 500
+def get_file_path(path):
+    return os.path.join(WEB_ROOT, path.lstrip("/"))
+
+def serve_static_file(file_path):
+    content_type, _ = mimetypes.guess_type(file_path)
+    if content_type is None:
+        content_type = "application/octet-stream"
+
+    try:
+        if content_type.startswith("text"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                body = f.read()
+            return http_response(body, content_type=content_type), 200
+        else:
+            with open(file_path, "rb") as f:
+                body = f.read()
+            return http_response(body, content_type=content_type, is_binary=True), 200
+    except Exception as e:
+        print(f"[ERROR] Could not read file: {e}")
+        return http_response("500 Internal Server Error", status_code=500), 500
     
-    elif os.path.isfile(file_path):
-        content_type, _ = mimetypes.guess_type(file_path)
-        if content_type is None:
-            content_type = "application/octet-stream"
 
-        try:
-            if content_type.startswith("text"):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    body = f.read()
-                return http_response(body, content_type=content_type), 200
-            else:
-                with open(file_path, "rb") as f:
-                    body = f.read()
-                return http_response(body, content_type=content_type, is_binary=True), 200
-        except Exception as e:
-            print(f"[ERROR] Could not read file: {e}")
-            return http_response("500 Internal Server Error", status_code=500), 500
-    else:
-        return http_response("404 Not Found", status_code=404), 404
+def serve_directory_listing(path, dir_path):
+    index_file = os.path.join(dir_path, "index.html")
+    if os.path.exists(index_file):
+        with open(index_file, "r", encoding="utf-8") as f:
+            body = f.read()
+        return http_response(body, content_type="text/html"), 200
+    
+    try:
+        items = os.listdir(dir_path)
+        links = []
+        for item in items:
+            full_path = os.path.join(path, item).replace("\\", "/")
+            links.append(f'<li><a href="{full_path}">{item}</a></li>')
+
+        body = f"<h1>Directory listing for {path}</h1><ul>{''.join(links)}</ul>"
+        return http_response(body, content_type="text/html"), 200
+    except Exception as e:
+        print(f"[ERROR] Failed to list directory: {e}")
+        return http_response("500 Internal Server Error", status_code=500), 500
 
 
 def http_response(body, status_code=200, content_type="text/plain", is_binary=False):
     status_messages = {
         200: "OK",
         404: "Not Found",
-        400: "Bad Request"
+        400: "Bad Request",
+        405: "Method Not Allowed",
+        500: "Internal Server Error"
     }
     status_text = status_messages.get(status_code, "OK")
 
@@ -119,7 +127,7 @@ def handle_client(client_conn, client_addr):
 
             case "POST":
                 form_data = parse_qs(body)
-                response_body = f"<h1>Form Data Received</h1><pre>{form_data}</prev>"
+                response_body = f"<h1>Form Data Received</h1><prev>{form_data}</prev>"
                 response = http_response(response_body, content_type="text/html")
                 status_code = 200
 
