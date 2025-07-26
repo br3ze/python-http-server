@@ -64,21 +64,27 @@ def get_file_path(request_path):
 # ===== HTTP CORE =======
 # =======================
 
-def http_response(body_content, status_code=200, content_type="text/plain", is_binary=False):
-    status_text = STATUS_CODES.get(status_code, "OK")
-    body_bytes = body_content if is_binary else body_content.encode()
+def http_response(body, status_code=200, content_type="text/plain", is_binary=False, extra_headers=None):
 
+    status_text = STATUS_CODES.get(status_code, "OK")
     headers = [
         f"HTTP/1.1 {status_code} {status_text}",
         f"Content-Type: {content_type}",
-        f"Content-Length: {len(body_bytes)}",
+        f"Content-Length: {len(body if is_binary else body.encode())}",
         "Connection: close",
-        "",
-        ""
     ]
 
+    if extra_headers:
+        for header_name, header_value in extra_headers.items():
+            headers.append(f"{header_name}: {header_value}")
+
+    headers.append("")  # blank line after headers
+    headers.append("")
+
     header_bytes = "\r\n".join(headers).encode()
-    return header_bytes + body_bytes
+
+    return header_bytes + (body if is_binary else body.encode())
+
 
 # =======================
 # === FILE HANDLING ====
@@ -89,34 +95,49 @@ def serve_static_file(file_path):
     if content_type is None:
         content_type = "application/octet-stream"
 
+    # Basic cache policy: cache static assets for 1 hour, no cache for HTML
+    if content_type.startswith("text/html"):
+        cache_header = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+    else:
+        cache_header = {"Cache-Control": "public, max-age=3600"}
+
     try:
         if content_type.startswith("text"):
             with open(file_path, "r", encoding="utf-8") as f:
-                body_content = f.read()
-            return http_response(body_content, content_type=content_type), 200
+                body = f.read()
+            return http_response(body, content_type=content_type, extra_headers=cache_header), 200
         else:
             with open(file_path, "rb") as f:
-                body_content = f.read()
-            return http_response(body_content, content_type=content_type, is_binary=True), 200
+                body = f.read()
+            return http_response(body, content_type=content_type, is_binary=True, extra_headers=cache_header), 200
     except Exception as e:
-        logging.error(f"Could not read file: {e}")
+        print(f"[ERROR] Could not read file: {e}")
         return http_response("500 Internal Server Error", status_code=500), 500
+
 
 
 def serve_directory_listing(path, dir_path):
     index_file = os.path.join(dir_path, "index.html")
+    no_cache_header = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     if os.path.exists(index_file):
         with open(index_file, "r", encoding="utf-8") as f:
-            return http_response(f.read(), content_type="text/html"), 200
+            body = f.read()
+        return http_response(body, content_type="text/html", extra_headers=no_cache_header), 200
 
     try:
         items = [item for item in os.listdir(dir_path) if not item.startswith(".")]
-        links = [f'<li><a href="{os.path.join(path, item).replace('\\', '/')}">{item}</a></li>' for item in items]
-        body_content = f"<h1>Directory listing for {path}</h1><ul>{''.join(links)}</ul>"
-        return http_response(body_content, content_type="text/html"), 200
+        links = []
+        for item in items:
+            full_path = os.path.join(path, item).replace("\\", "/")
+            links.append(f'<li><a href="{full_path}">{item}</a></li>')
+
+        body = f"<h1>Directory listing for {path}</h1><ul>{''.join(links)}</ul>"
+        return http_response(body, content_type="text/html", extra_headers=no_cache_header), 200
     except Exception as e:
-        logging.error(f"Failed to list directory: {e}")
+        print(f"[ERROR] Failed to list directory: {e}")
         return http_response("500 Internal Server Error", status_code=500), 500
+
 
 # =======================
 # ===== METHOD HANDLERS ===
